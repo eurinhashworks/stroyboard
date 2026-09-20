@@ -1,239 +1,69 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
 import { 
   Clapperboard, 
+  Sparkles, 
   Send, 
   Loader2, 
-  Film, 
   Music, 
   MousePointerClick, 
-  Camera, 
-  Clock, 
-  Smile, 
-  Type as TypeIcon,
-  Image as ImageIcon,
-  Sparkles,
-  ChevronRight,
-  Download,
-  Play,
-  Pause,
+  Download, 
+  Film,
+  Plus,
+  RefreshCw,
+  Sliders,
+  CheckCircle2,
   Volume2,
-  ArrowUp,
-  ArrowDown
+  Trash2,
+  Wand2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { jsPDF } from "jspdf";
-import { domToPng } from "modern-screenshot";
+import { domToPng } from 'modern-screenshot';
 
-// --- Types ---
-
-interface Scene {
-  id?: string;
-  number: number;
-  voiceover: string;
-  visualDescription: string;
-  imagePrompt: string;
-  onScreenText: string;
-  emotion: string;
-  cameraMovement: string;
-  duration: string;
-  previewUrl?: string;
-  audioUrl?: string;
-}
-
-interface Storyboard {
-  scenes: Scene[];
-  recommendedMusic: string;
-  finalCTA: string;
-  ambianceAudioUrl?: string;
-}
+import { Scene, Storyboard, VisualStyle } from './types';
+import { PRESET_STORIES, VISUAL_STYLES } from './data/presets';
+import { Navbar } from './components/Navbar';
+import { AudioPlayer } from './components/AudioPlayer';
+import { SceneCard } from './components/SceneCard';
+import { DirectorMonitor } from './components/DirectorMonitor';
+import { StoryboardOverview } from './components/StoryboardOverview';
+import { ImageModal } from './components/ImageModal';
 
 // --- Constants ---
-
 const GEMINI_MODEL = "gemini-3.1-pro-preview";
 const IMAGE_MODEL = "gemini-2.5-flash-image";
 const TTS_MODEL = "gemini-2.5-flash-preview-tts";
 
-// --- Components ---
-
-const SceneAudioPlayer = ({ url }: { url: string }) => {
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const audioRef = React.useRef<HTMLAudioElement>(null);
-
-  const togglePlay = () => {
-    if (audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.pause();
-      } else {
-        audioRef.current.play();
-      }
-      setIsPlaying(!isPlaying);
-    }
-  };
-
-  const handleTimeUpdate = () => {
-    if (audioRef.current) {
-      const p = (audioRef.current.currentTime / audioRef.current.duration) * 100;
-      setProgress(p || 0);
-    }
-  };
-
-  return (
-    <div className="flex items-center gap-4 mt-4 p-3 bg-white/5 border border-white/10 rounded-xl group/audio transition-all hover:bg-white/10">
-      <button 
-        onClick={togglePlay}
-        className="w-10 h-10 flex items-center justify-center bg-orange-500 rounded-full text-white shadow-lg shadow-orange-500/20 active:scale-95 transition-all"
-      >
-        {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
-      </button>
-      <div className="flex-1 h-1 bg-white/10 rounded-full overflow-hidden relative">
-        <div 
-          style={{ width: `${progress}%` }}
-          className="h-full bg-orange-500 transition-all duration-100"
-        />
-      </div>
-      <Volume2 className="w-4 h-4 text-white/20 group-hover/audio:text-orange-500 transition-colors" />
-      <audio 
-        ref={audioRef} 
-        src={url} 
-        onTimeUpdate={handleTimeUpdate}
-        onEnded={() => {
-          setIsPlaying(false);
-          setProgress(0);
-        }}
-        className="hidden"
-      />
-    </div>
-  );
-};
-
 export default function App() {
   const [narration, setNarration] = useState('');
+  const [selectedStyle, setSelectedStyle] = useState<VisualStyle>(VISUAL_STYLES[0]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const [storyboard, setStoryboard] = useState<Storyboard | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Media generation states
   const [isGeneratingImages, setIsGeneratingImages] = useState(false);
   const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
   const [isGeneratingAmbiance, setIsGeneratingAmbiance] = useState(false);
   const [regeneratingImages, setRegeneratingImages] = useState<Set<number>>(new Set());
+
+  // Edit and Modal states
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState<Partial<Scene>>({});
+  const [selectedModalScene, setSelectedModalScene] = useState<Scene | null>(null);
   const [isExporting, setIsExporting] = useState(false);
-  const storyboardRef = React.useRef<HTMLDivElement>(null);
+
+  const storyboardRef = useRef<HTMLDivElement>(null);
+  const sceneElementsRef = useRef<{ [key: number]: HTMLDivElement | null }>({});
 
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
-  const generateSinglePreview = async (idx: number) => {
-    if (!storyboard) return;
-    
-    setRegeneratingImages(prev => new Set(prev).add(idx));
-    
-    try {
-      const scene = storyboard.scenes[idx];
-      const response = await ai.models.generateContent({
-        model: IMAGE_MODEL,
-        contents: [{ parts: [{ text: `Cinematic vertical 9:16 shot, high quality, professional lighting, emotional atmosphere. Scene description: ${scene.imagePrompt}` }] }],
-        config: {
-          imageConfig: {
-            aspectRatio: "9:16"
-          }
-        }
-      });
+  // Calculate word count and estimated speech duration
+  const wordCount = narration.trim() ? narration.trim().split(/\s+/).length : 0;
+  const estimatedSeconds = Math.max(5, Math.round(wordCount / 2.5));
 
-      const imagePart = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
-      if (imagePart?.inlineData) {
-        const updatedScenes = [...storyboard.scenes];
-        updatedScenes[idx] = {
-          ...scene,
-          previewUrl: `data:image/png;base64,${imagePart.inlineData.data}`
-        };
-        setStoryboard({ ...storyboard, scenes: updatedScenes });
-      }
-    } catch (err) {
-      console.error(`Failed to regenerate image for scene ${idx + 1}`, err);
-    } finally {
-      setRegeneratingImages(prev => {
-        const next = new Set(prev);
-        next.delete(idx);
-        return next;
-      });
-    }
-  };
-
-  const handleEditScene = (idx: number, scene: Scene) => {
-    setEditingIdx(idx);
-    setEditForm({ ...scene });
-  };
-
-  const handleSaveScene = (idx: number) => {
-    if (!storyboard) return;
-    const updatedScenes = [...storyboard.scenes];
-    updatedScenes[idx] = { ...updatedScenes[idx], ...editForm } as Scene;
-    setStoryboard({ ...storyboard, scenes: updatedScenes });
-    setEditingIdx(null);
-  };
-
-  const moveScene = (index: number, direction: 'up' | 'down') => {
-    if (!storyboard) return;
-    const targetIndex = direction === 'up' ? index - 1 : index + 1;
-    if (targetIndex < 0 || targetIndex >= storyboard.scenes.length) return;
-
-    const newScenes = [...storyboard.scenes];
-    const [movedScene] = newScenes.splice(index, 1);
-    newScenes.splice(targetIndex, 0, movedScene);
-
-    // Renumber scenes sequentially so the number matches the chronological timeline
-    const renumberedScenes = newScenes.map((sc, i) => ({
-      ...sc,
-      number: i + 1,
-    }));
-
-    setStoryboard({
-      ...storyboard,
-      scenes: renumberedScenes,
-    });
-
-    // Remap regenerating images indices if an image is currently in flight
-    if (regeneratingImages.size > 0) {
-      setRegeneratingImages(prev => {
-        const next = new Set<number>();
-        prev.forEach(i => {
-          if (i === index) {
-            next.add(targetIndex);
-          } else if (i === targetIndex) {
-            next.add(index);
-          } else {
-            next.add(i);
-          }
-        });
-        return next;
-      });
-    }
-
-    // Keep active editing on the same scene if user moves it while editing
-    if (editingIdx === index) {
-      setEditingIdx(targetIndex);
-    } else if (editingIdx === targetIndex) {
-      setEditingIdx(index);
-    }
-  };
-
-  const downloadFile = (url: string, filename: string) => {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
+  // --- Storyboard Generation ---
   const generateStoryboard = async () => {
     if (!narration.trim()) return;
 
@@ -241,6 +71,7 @@ export default function App() {
     setStreamingText('');
     setError(null);
     setStoryboard(null);
+    setEditingIdx(null);
 
     try {
       const responseStream = await ai.models.generateContentStream({
@@ -248,33 +79,39 @@ export default function App() {
         contents: [
           {
             role: "user",
-            parts: [{ text: `Tu es un réalisateur IA spécialisé dans la création de vidéos courtes cinématographiques pour les réseaux sociaux.
-            Ta mission est de transformer la narration suivante en un storyboard complet pour une vidéo verticale (9:16) de 30 secondes.
-            
-            Narration: "${narration}"
-            
-            Instructions:
-            1. Découpe l’histoire en scènes de 3-4 secondes.
-            2. Maintiens une cohérence visuelle.
-            3. Le ton doit être émotionnel, immersif et mystérieux.
-            
-            Réponds UNIQUEMENT au format JSON avec la structure suivante:
-            {
-              "scenes": [
-                {
-                  "number": number,
-                  "voiceover": "phrase de la voix off",
-                  "visualDescription": "description visuelle détaillée",
-                  "imagePrompt": "prompt détaillé en anglais pour un générateur d'image (style cinématographique, 9:16)",
-                  "onScreenText": "texte à afficher",
-                  "emotion": "émotion/atmosphère",
-                  "cameraMovement": "mouvement recommandé",
-                  "duration": "durée estimée"
-                }
-              ],
-              "recommendedMusic": "type de musique",
-              "finalCTA": "appel à l'action final"
-            }` }]
+            parts: [{ 
+              text: `Tu es un réalisateur et directeur artistique d'élite, spécialisé dans la création de vidéos courtes ultra-cinématographiques pour les réseaux sociaux (TikTok, Instagram Reels, Shorts au format vertical 9:16).
+              
+Ta mission : Découper la narration suivante en un storyboard professionnel complet, captivant et rythmé d'environ 20 à 35 secondes.
+Style visuel cible : ${selectedStyle.label}.
+Directives visuelles obligatoires pour les prompts : ${selectedStyle.promptModifier}
+
+Narration source : "${narration}"
+
+INSTRUCTIONS :
+1. Découpe l'histoire en scènes courtes de 3 à 5 secondes.
+2. Assure une forte tension émotionnelle et une cohérence visuelle parfaite entre chaque plan.
+3. Chaque 'imagePrompt' doit être en anglais, très précis et descriptif (composition 9:16 verticale, éclairage cinématique, lentille, ambiance, sujet en action).
+4. Fournis une recommandation musicale d'ambiance et un appel à l'action final (finalCTA).
+
+Réponds STRICTEMENT au format JSON avec cette structure :
+{
+  "scenes": [
+    {
+      "number": number,
+      "voiceover": "phrase exacte de la voix off pour ce plan",
+      "visualDescription": "description visuelle détaillée pour le réalisateur",
+      "imagePrompt": "detailed prompt in English with 9:16 vertical framing, camera specs and lighting",
+      "onScreenText": "texte court à incruster à l'écran (punchy)",
+      "emotion": "émotion dominante (ex: Mystère, Émerveillement, Suspense)",
+      "cameraMovement": "mouvement de caméra (ex: Travelling avant lent, Contre-plongée)",
+      "duration": "durée (ex: 3-4s)"
+    }
+  ],
+  "recommendedMusic": "description évocatrice de l'ambiance musicale",
+  "finalCTA": "texte d'appel à l'action final percutant"
+}` 
+            }]
           }
         ],
         config: {
@@ -330,6 +167,53 @@ export default function App() {
     }
   };
 
+  // --- Image Generation ---
+  const generateSinglePreview = async (idx: number) => {
+    if (!storyboard) return;
+
+    setRegeneratingImages(prev => new Set(prev).add(idx));
+
+    try {
+      const scene = storyboard.scenes[idx];
+      const response = await ai.models.generateContent({
+        model: IMAGE_MODEL,
+        contents: [{ 
+          parts: [{ 
+            text: `Cinematic vertical 9:16 still shot, professional high-end film production, master lighting, volumetric atmosphere. ${selectedStyle.promptModifier}. Scene details: ${scene.imagePrompt}` 
+          }] 
+        }],
+        config: {
+          imageConfig: {
+            aspectRatio: "9:16"
+          }
+        }
+      });
+
+      const imagePart = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
+      if (imagePart?.inlineData) {
+        const updatedScenes = [...storyboard.scenes];
+        updatedScenes[idx] = {
+          ...scene,
+          previewUrl: `data:image/png;base64,${imagePart.inlineData.data}`
+        };
+        setStoryboard({ ...storyboard, scenes: updatedScenes });
+        
+        // Update modal scene if open
+        if (selectedModalScene && selectedModalScene.number === scene.number) {
+          setSelectedModalScene(updatedScenes[idx]);
+        }
+      }
+    } catch (err) {
+      console.error(`Failed to generate image for scene ${idx + 1}`, err);
+    } finally {
+      setRegeneratingImages(prev => {
+        const next = new Set(prev);
+        next.delete(idx);
+        return next;
+      });
+    }
+  };
+
   const generatePreviews = async () => {
     if (!storyboard) return;
     setIsGeneratingImages(true);
@@ -342,6 +226,7 @@ export default function App() {
     setIsGeneratingImages(false);
   };
 
+  // --- Voiceover & Audio Generation ---
   const generateVoiceovers = async () => {
     if (!storyboard) return;
     setIsGeneratingAudio(true);
@@ -355,12 +240,12 @@ export default function App() {
 
         const response = await ai.models.generateContent({
           model: TTS_MODEL,
-          contents: [{ parts: [{ text: `Dis de manière cinématographique et émotionnelle : ${scene.voiceover}` }] }],
+          contents: [{ parts: [{ text: `Dis de manière cinématographique, immersive et émotionnelle : ${scene.voiceover}` }] }],
           config: {
             responseModalities: ["AUDIO"],
             speechConfig: {
               voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: 'Kore' } // 'Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr'
+                prebuiltVoiceConfig: { voiceName: 'Kore' }
               }
             }
           }
@@ -413,15 +298,121 @@ export default function App() {
     }
   };
 
+  // --- Scene Operations (Move, Duplicate, Delete, Add, Edit) ---
+  const moveScene = (index: number, direction: 'up' | 'down') => {
+    if (!storyboard) return;
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= storyboard.scenes.length) return;
+
+    const newScenes = [...storyboard.scenes];
+    const [movedScene] = newScenes.splice(index, 1);
+    newScenes.splice(targetIndex, 0, movedScene);
+
+    const renumbered = newScenes.map((sc, i) => ({
+      ...sc,
+      number: i + 1,
+    }));
+
+    setStoryboard({
+      ...storyboard,
+      scenes: renumbered,
+    });
+
+    if (editingIdx === index) {
+      setEditingIdx(targetIndex);
+    } else if (editingIdx === targetIndex) {
+      setEditingIdx(index);
+    }
+  };
+
+  const duplicateScene = (index: number) => {
+    if (!storyboard) return;
+    const sourceScene = storyboard.scenes[index];
+    const clonedScene: Scene = {
+      ...sourceScene,
+      id: `scene-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      voiceover: `${sourceScene.voiceover} (Copie)`,
+    };
+
+    const newScenes = [...storyboard.scenes];
+    newScenes.splice(index + 1, 0, clonedScene);
+
+    const renumbered = newScenes.map((sc, i) => ({
+      ...sc,
+      number: i + 1,
+    }));
+
+    setStoryboard({
+      ...storyboard,
+      scenes: renumbered,
+    });
+  };
+
+  const deleteScene = (index: number) => {
+    if (!storyboard || storyboard.scenes.length <= 1) return;
+    const newScenes = storyboard.scenes.filter((_, i) => i !== index);
+    const renumbered = newScenes.map((sc, i) => ({
+      ...sc,
+      number: i + 1,
+    }));
+
+    setStoryboard({
+      ...storyboard,
+      scenes: renumbered,
+    });
+
+    if (editingIdx === index) {
+      setEditingIdx(null);
+    }
+  };
+
+  const addScene = () => {
+    if (!storyboard) return;
+    const nextNum = storyboard.scenes.length + 1;
+    const newScene: Scene = {
+      id: `scene-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      number: nextNum,
+      voiceover: "Nouvelle réplique de voix off...",
+      visualDescription: "Description du plan pour la caméra et les acteurs...",
+      imagePrompt: "Cinematic vertical 9:16 shot, atmospheric lighting, high quality film production",
+      onScreenText: "Texte à l'écran",
+      emotion: "Intense",
+      cameraMovement: "Travelling avant",
+      duration: "3-4s"
+    };
+
+    setStoryboard({
+      ...storyboard,
+      scenes: [...storyboard.scenes, newScene],
+    });
+    setEditingIdx(storyboard.scenes.length);
+  };
+
+  const handleSaveScene = (idx: number, updatedData: Partial<Scene>) => {
+    if (!storyboard) return;
+    const updatedScenes = [...storyboard.scenes];
+    updatedScenes[idx] = { ...updatedScenes[idx], ...updatedData } as Scene;
+    setStoryboard({ ...storyboard, scenes: updatedScenes });
+    setEditingIdx(null);
+  };
+
+  const downloadFile = (url: string, filename: string) => {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const exportToPDF = async () => {
     if (!storyboardRef.current || !storyboard) return;
     setIsExporting(true);
 
     try {
-      // modern-screenshot handles modern CSS like oklch/oklab better than html2canvas
       const imgData = await domToPng(storyboardRef.current, {
         scale: 2,
-        backgroundColor: "#050505",
+        backgroundColor: "#07080d",
         quality: 1,
       });
 
@@ -436,7 +427,7 @@ export default function App() {
       });
 
       pdf.addImage(imgData, "PNG", 0, 0, width, height);
-      pdf.save(`storyboard-${Date.now()}.pdf`);
+      pdf.save(`storyboard-director-${Date.now()}.pdf`);
     } catch (err) {
       console.error("Failed to export PDF", err);
       setError("Erreur lors de l'exportation du PDF. Veuillez réessayer.");
@@ -445,564 +436,399 @@ export default function App() {
     }
   };
 
+  const handleScrollToScene = (idx: number) => {
+    const el = sceneElementsRef.current[idx];
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-[#050505] text-white font-sans selection:bg-orange-500/30">
-      {/* Hero Section */}
-      <header className="relative h-[60vh] flex flex-col items-center justify-center overflow-hidden border-b border-white/10">
-        <div className="absolute inset-0 z-0">
-          <div className="absolute inset-0 bg-gradient-to-b from-transparent to-[#050505]" />
-          <img 
-            src="https://images.unsplash.com/photo-1485846234645-a62644f84728?auto=format&fit=crop&q=80&w=2000" 
-            alt="Cinematic Background" 
-            className="w-full h-full object-cover opacity-40 grayscale"
-            referrerPolicy="no-referrer"
-          />
-        </div>
+    <div className="min-h-screen bg-[#07080d] text-slate-100 font-sans flex flex-col selection:bg-orange-500/30 selection:text-orange-200">
+      
+      {/* Top Studio Navbar */}
+      <Navbar
+        storyboard={storyboard}
+        isExporting={isExporting}
+        onExportPDF={exportToPDF}
+        onReset={() => {
+          if (window.confirm("Créer un nouveau projet ? Le storyboard actuel sera effacé.")) {
+            setStoryboard(null);
+            setNarration('');
+            setStreamingText('');
+            setError(null);
+          }
+        }}
+      />
 
-        <div className="relative z-10 text-center px-6 max-w-4xl">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8 }}
-          >
-            <div className="flex items-center justify-center gap-2 mb-6">
-              <span className="px-3 py-1 text-[10px] font-bold tracking-[0.2em] uppercase border border-white/20 rounded-full bg-white/5 backdrop-blur-sm">
-                AI Director Pro
-              </span>
-            </div>
-            <h1 className="text-6xl md:text-8xl font-black tracking-tighter uppercase leading-[0.85] mb-8 italic font-display">
-              Storyboard <br />
-              <span className="text-orange-500">Cinématographique</span>
-            </h1>
-            <p className="text-lg md:text-xl text-white/60 max-w-2xl mx-auto font-light leading-relaxed">
-              Transformez vos récits en visions visuelles et sonores. L'IA analyse votre narration pour créer un découpage technique prêt pour la production.
-            </p>
-          </motion.div>
-        </div>
-      </header>
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-8 sm:py-12">
+        
+        {/* Hero Section & Studio Command Deck */}
+        <section className="mb-12 sm:mb-16">
+          <div className="relative rounded-3xl p-6 sm:p-10 md:p-12 overflow-hidden bg-gradient-to-b from-white/[0.04] to-white/[0.01] border border-white/[0.08] shadow-2xl">
+            {/* Background Ambient Glows */}
+            <div className="absolute -top-32 -left-32 w-80 h-80 bg-orange-500/10 rounded-full blur-[100px] pointer-events-none" />
+            <div className="absolute -bottom-32 -right-32 w-80 h-80 bg-amber-500/10 rounded-full blur-[100px] pointer-events-none" />
 
-      <main className="max-w-6xl mx-auto px-6 py-20">
-        {/* Input Section */}
-        <section className="mb-20">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
-            <div className="lg:col-span-4">
-              <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
-                <Clapperboard className="w-6 h-6 text-orange-500" />
-                Narration
-              </h2>
-              <p className="text-white/40 text-sm leading-relaxed">
-                Collez votre voix off ou votre histoire ici. L'IA s'occupera de la découper en scènes émotionnelles et de générer les prompts visuels et les voix off.
-              </p>
-            </div>
-            <div className="lg:col-span-8">
-              <div className="relative group">
-                <textarea
-                  value={narration}
-                  onChange={(e) => setNarration(e.target.value)}
-                  placeholder="Il était une fois, dans le silence d'une ville endormie..."
-                  className="w-full h-64 bg-white/5 border border-white/10 rounded-2xl p-6 text-lg focus:outline-none focus:border-orange-500/50 transition-all resize-none placeholder:text-white/10"
-                />
-                <button
-                  onClick={generateStoryboard}
-                  disabled={isGenerating || !narration.trim()}
-                  className="absolute bottom-6 right-6 px-8 py-3 bg-orange-500 hover:bg-orange-600 disabled:bg-white/10 disabled:text-white/20 rounded-full font-bold flex items-center gap-2 transition-all active:scale-95 z-20"
-                >
-                  {isGenerating ? (
-                    <>
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                      Analyse...
-                    </>
-                  ) : (
-                    <>
-                      <Send className="w-5 h-5" />
-                      Générer le Storyboard
-                    </>
-                  )}
-                </button>
+            <div className="relative z-10 max-w-4xl mx-auto text-center">
+              
+              {/* Header Badge */}
+              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/[0.04] border border-white/10 text-xs font-semibold text-white/80 backdrop-blur-md mb-6 shadow-sm">
+                <Sparkles className="w-3.5 h-3.5 text-orange-400" />
+                <span>Format Vertical 9:16 • TikTok, Reels, Shorts</span>
               </div>
+
+              {/* Display Headline */}
+              <h1 className="text-3xl sm:text-5xl md:text-6xl font-black tracking-tight font-display text-white mb-4 leading-[1.08]">
+                Transformez votre récit en <br className="hidden sm:inline" />
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-400 via-amber-400 to-orange-500">
+                  Storyboard Cinématographique
+                </span>
+              </h1>
+
+              <p className="text-sm sm:text-base text-white/60 max-w-2xl mx-auto font-normal leading-relaxed mb-8">
+                L'IA analyse votre texte, découpe vos plans en séquences émotionnelles de 3 à 5 secondes, et prépare les prompts 9:16 et voix off de production.
+              </p>
+
+              {/* Inspiring Preset Story Chips */}
+              <div className="mb-8">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-white/40 mb-3 flex items-center justify-center gap-1.5">
+                  <Wand2 className="w-3 h-3 text-orange-400" /> Exemples inspirants en 1-clic :
+                </div>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  {PRESET_STORIES.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => setNarration(preset.text)}
+                      className="px-3.5 py-1.5 rounded-xl bg-white/[0.04] hover:bg-orange-500/15 border border-white/[0.08] hover:border-orange-500/40 text-xs font-medium text-white/80 hover:text-orange-300 transition-all cursor-pointer shadow-sm active:scale-95 flex items-center gap-1.5"
+                    >
+                      <span>{preset.title}</span>
+                      <span className="text-[10px] text-white/40 font-mono">({preset.tag})</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Main Prompt Deck Card */}
+              <div className="bg-[#0b0c14] border border-white/10 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-2xl text-left">
+                
+                {/* Visual Style Selector */}
+                <div className="mb-4">
+                  <label className="text-[11px] font-bold uppercase tracking-wider text-white/40 mb-2 flex items-center gap-1.5">
+                    <Sliders className="w-3.5 h-3.5 text-orange-400" /> Style Visuel & Photographique :
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {VISUAL_STYLES.map((style) => (
+                      <button
+                        key={style.id}
+                        type="button"
+                        onClick={() => setSelectedStyle(style)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all cursor-pointer border ${
+                          selectedStyle.id === style.id
+                            ? 'bg-orange-500 text-white border-orange-500 shadow-md shadow-orange-500/25 font-semibold'
+                            : 'bg-white/[0.03] text-white/60 border-white/[0.08] hover:bg-white/[0.07] hover:text-white'
+                        }`}
+                      >
+                        {style.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Textarea */}
+                <div className="relative">
+                  <textarea
+                    value={narration}
+                    onChange={(e) => setNarration(e.target.value)}
+                    placeholder="Collez ou écrivez votre voix off ici... Ex: La nuit tombait sur les toits humides de Paris. Une lueur dorée filtrait à travers les rideaux d'un atelier secret..."
+                    className="w-full h-44 sm:h-48 bg-white/[0.02] border border-white/[0.08] focus:border-orange-500/60 focus:ring-1 focus:ring-orange-500/30 rounded-xl p-4 sm:p-5 text-sm sm:text-base text-white placeholder:text-white/20 transition-all resize-none outline-none font-sans leading-relaxed"
+                  />
+                  
+                  {/* Textarea Bottom Tools */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 mt-3 pt-3 border-t border-white/[0.06]">
+                    <div className="flex items-center gap-3 text-xs text-white/40 font-mono">
+                      <span>{wordCount} mots</span>
+                      <span>•</span>
+                      <span>~{estimatedSeconds}s durée estimée</span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {narration.trim() && (
+                        <button
+                          type="button"
+                          onClick={() => setNarration('')}
+                          className="px-3 py-2 text-xs text-white/40 hover:text-white/80 hover:bg-white/5 rounded-xl transition-colors cursor-pointer"
+                        >
+                          Effacer
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={generateStoryboard}
+                        disabled={isGenerating || !narration.trim()}
+                        className="px-6 py-2.5 bg-gradient-to-r from-orange-500 via-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 disabled:from-white/10 disabled:to-white/10 disabled:text-white/25 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-lg shadow-orange-500/25 active:scale-95 cursor-pointer disabled:cursor-not-allowed flex items-center gap-2"
+                      >
+                        {isGenerating ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span>Découpage en cours...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Send className="w-4 h-4" />
+                            <span>Générer le Storyboard</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
             </div>
           </div>
         </section>
 
-        {/* Error Message */}
+        {/* Error Notification */}
         <AnimatePresence>
           {error && (
             <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="bg-red-500/10 border border-red-500/20 text-red-500 p-4 rounded-xl mb-10 text-center"
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="mb-8 p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-2xl text-center text-sm font-medium flex items-center justify-center gap-2"
             >
-              {error}
+              <span>{error}</span>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* Director's Monitor (Streaming Flow) */}
+        {/* Live Director's Monitor while streaming generation */}
         <AnimatePresence>
           {isGenerating && (
-            <motion.section
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="mb-20"
-            >
-              <div className="bg-[#0a0a0a] border border-orange-500/30 rounded-[2rem] overflow-hidden shadow-[0_0_50px_rgba(249,115,22,0.1)]">
-                <div className="bg-orange-500/10 border-b border-orange-500/20 px-6 py-3 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-                    <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-orange-500">Live Analysis Monitor</span>
-                  </div>
-                  <div className="flex gap-1.5">
-                    <div className="w-2 h-2 rounded-full bg-white/10" />
-                    <div className="w-2 h-2 rounded-full bg-white/10" />
-                    <div className="w-2 h-2 rounded-full bg-white/10" />
-                  </div>
-                </div>
-                <div className="p-8 font-mono text-xs text-orange-500/60 leading-relaxed h-64 overflow-y-auto scrollbar-hide">
-                  <div className="flex flex-col gap-2">
-                    <div className="flex items-center gap-2 text-white/40">
-                      <span className="text-orange-500/40">[{new Date().toLocaleTimeString()}]</span>
-                      <span>Initializing neural storyboard engine...</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-white/40">
-                      <span className="text-orange-500/40">[{new Date().toLocaleTimeString()}]</span>
-                      <span>Analyzing narrative emotional weight...</span>
-                    </div>
-                    <div className="mt-4 text-orange-500/90 whitespace-pre-wrap break-all">
-                      {streamingText || "Waiting for stream data..."}
-                    </div>
-                    <motion.div 
-                      animate={{ opacity: [0, 1] }}
-                      transition={{ repeat: Infinity, duration: 0.8 }}
-                      className="w-2 h-4 bg-orange-500/50 inline-block align-middle"
-                    />
-                  </div>
-                </div>
-                <div className="bg-orange-500/5 px-6 py-2 border-t border-orange-500/10 flex items-center justify-between">
-                  <span className="text-[8px] uppercase tracking-widest text-white/20">Stream Status: Active</span>
-                  <span className="text-[8px] uppercase tracking-widest text-white/20">Model: {GEMINI_MODEL}</span>
-                </div>
-              </div>
-            </motion.section>
+            <DirectorMonitor
+              streamingText={streamingText}
+              modelName={GEMINI_MODEL}
+            />
           )}
         </AnimatePresence>
 
-        {/* Results Section */}
+        {/* Results & Storyboard Canvas */}
         <AnimatePresence>
           {storyboard && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="space-y-20"
+            <motion.section
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-12"
             >
-              {/* Summary Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="p-8 bg-white/5 border border-white/10 rounded-3xl backdrop-blur-xl relative group">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-3 text-orange-500">
-                      <Music className="w-6 h-6" />
-                      <h3 className="font-bold uppercase tracking-wider text-xs">Ambiance Sonore</h3>
+              {/* Top Soundstage & CTA Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {/* Music Ambiance card */}
+                <div className="p-6 bg-[#0c0e18] border border-white/[0.08] rounded-2xl sm:rounded-3xl relative overflow-hidden shadow-lg">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2.5 text-orange-400">
+                      <Music className="w-5 h-5" />
+                      <h3 className="font-bold text-xs uppercase tracking-wider">Ambiance Sonore Recommandée</h3>
                     </div>
                     {storyboard.ambianceAudioUrl ? (
-                      <button 
+                      <button
+                        type="button"
                         onClick={() => downloadFile(storyboard.ambianceAudioUrl!, 'ambiance.mp3')}
-                        className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-bold text-white/20 hover:text-orange-500 transition-colors"
+                        className="text-[11px] font-bold text-white/50 hover:text-orange-400 flex items-center gap-1 transition-colors cursor-pointer"
                       >
-                        <Download className="w-4 h-4" /> Télécharger MP3
+                        <Download className="w-3.5 h-3.5" /> MP3
                       </button>
                     ) : (
-                      <button 
+                      <button
+                        type="button"
                         onClick={generateAmbiance}
                         disabled={isGeneratingAmbiance}
-                        className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-bold text-white/20 hover:text-orange-500 transition-colors disabled:opacity-50"
+                        className="px-3 py-1 bg-white/[0.05] hover:bg-orange-500 hover:text-white text-orange-400 text-xs font-bold rounded-lg transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1"
                       >
-                        {isGeneratingAmbiance ? <Loader2 className="w-3 h-3 animate-spin" /> : <><Sparkles className="w-3 h-3" /> Générer MP3</>}
+                        {isGeneratingAmbiance ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                        <span>Générer Audio</span>
                       </button>
                     )}
                   </div>
-                  <p className="text-xl font-light italic text-white/80">"{storyboard.recommendedMusic}"</p>
+                  <p className="text-base sm:text-lg font-light italic text-white/90 leading-snug">
+                    "{storyboard.recommendedMusic}"
+                  </p>
                   {storyboard.ambianceAudioUrl && (
-                    <SceneAudioPlayer url={storyboard.ambianceAudioUrl} />
+                    <AudioPlayer
+                      url={storyboard.ambianceAudioUrl}
+                      filename="ambiance-cinematique.mp3"
+                      label="Bande sonore suggérée"
+                    />
                   )}
                 </div>
-                <div className="p-8 bg-white/5 border border-white/10 rounded-3xl backdrop-blur-xl">
-                  <div className="flex items-center gap-3 mb-4 text-orange-500">
-                    <MousePointerClick className="w-6 h-6" />
-                    <h3 className="font-bold uppercase tracking-wider text-xs">Appel à l'Action</h3>
+
+                {/* Final Call to Action card */}
+                <div className="p-6 bg-[#0c0e18] border border-white/[0.08] rounded-2xl sm:rounded-3xl shadow-lg flex flex-col justify-between">
+                  <div className="flex items-center gap-2.5 mb-3 text-amber-400">
+                    <MousePointerClick className="w-5 h-5" />
+                    <h3 className="font-bold text-xs uppercase tracking-wider">Appel à l'Action Final (CTA)</h3>
                   </div>
-                  <p className="text-xl font-light italic text-white/80">"{storyboard.finalCTA}"</p>
+                  <p className="text-base sm:text-lg font-medium text-white/95 leading-snug">
+                    "{storyboard.finalCTA}"
+                  </p>
+                  <div className="text-[11px] font-mono text-white/40 mt-3 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Optimisé pour la rétention et l'engagement TikTok / Reels</span>
+                  </div>
                 </div>
               </div>
 
-              {/* Scenes Grid */}
-              <div className="space-y-12">
-                <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                  <h2 className="text-4xl font-black uppercase italic tracking-tighter font-display">
-                    Scénario <span className="text-orange-500">Détaillé</span>
+              {/* Storyboard Timeline Ribbon */}
+              <StoryboardOverview
+                scenes={storyboard.scenes}
+                onSelectScene={handleScrollToScene}
+              />
+
+              {/* Master Control Bar */}
+              <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-[#0b0c14] border border-white/[0.08] rounded-2xl shadow-xl">
+                <div className="flex items-center gap-3">
+                  <h2 className="text-xl sm:text-2xl font-black font-display text-white">
+                    Plans Séquences ({storyboard.scenes.length})
                   </h2>
-                  <div className="flex flex-wrap gap-4">
-                    <button
-                      onClick={generatePreviews}
-                      disabled={isGeneratingImages}
-                      className="flex items-center gap-2 px-6 py-2 border border-white/20 rounded-full hover:bg-white/5 transition-all disabled:opacity-50 text-xs font-bold uppercase tracking-widest"
-                    >
-                      {isGeneratingImages ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <Sparkles className="w-4 h-4 text-orange-500" />
-                      )}
-                      Visuels
-                    </button>
-                    <button
-                      onClick={generateVoiceovers}
-                      disabled={isGeneratingAudio}
-                      className="flex items-center gap-2 px-6 py-2 border border-white/20 rounded-full hover:bg-white/5 transition-all disabled:opacity-50 text-xs font-bold uppercase tracking-widest"
-                    >
-                      {isGeneratingAudio ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <Music className="w-4 h-4 text-orange-500" />
-                      )}
-                      Voix Off
-                    </button>
-                    <button
-                      onClick={exportToPDF}
-                      disabled={isExporting}
-                      className="flex items-center gap-2 px-6 py-2 bg-orange-500 text-white rounded-full hover:bg-orange-600 transition-all disabled:opacity-50 text-xs font-bold uppercase tracking-widest shadow-lg shadow-orange-500/20"
-                    >
-                      {isExporting ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <Download className="w-4 h-4" />
-                      )}
-                      Exporter PDF
-                    </button>
-                  </div>
                 </div>
 
-                <div ref={storyboardRef} className="grid grid-cols-1 gap-12 p-4">
-                  {storyboard.scenes.map((scene, idx) => (
-                    <motion.div
-                      key={scene.id || `scene-${idx}`}
-                      layout
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ layout: { duration: 0.3, ease: "easeInOut" } }}
-                      className="group grid grid-cols-1 lg:grid-cols-12 gap-8 p-8 bg-white/5 border border-white/10 rounded-[2rem] hover:bg-white/[0.07] transition-all"
-                    >
-                      {/* Visual Preview */}
-                      <div className="lg:col-span-4 aspect-[9/16] bg-black rounded-2xl overflow-hidden relative border border-white/10 group/img">
-                        {regeneratingImages.has(idx) ? (
-                          <div className="w-full h-full flex flex-col items-center justify-center bg-white/5 animate-pulse">
-                            <Loader2 className="w-10 h-10 animate-spin text-orange-500 mb-4" />
-                            <span className="text-[10px] uppercase tracking-widest font-bold text-orange-500/50">Régénération...</span>
-                          </div>
-                        ) : scene.previewUrl ? (
-                          <>
-                            <img 
-                              src={scene.previewUrl} 
-                              alt={`Scene ${scene.number}`} 
-                              className="w-full h-full object-cover"
-                            />
-                            <div className="absolute bottom-4 right-4 flex flex-col gap-2 opacity-0 group-hover/img:opacity-100 transition-opacity">
-                              <button 
-                                onClick={() => downloadFile(scene.previewUrl!, `scene-${scene.number}.png`)}
-                                className="p-3 bg-black/50 backdrop-blur-md rounded-full hover:bg-orange-500 transition-colors"
-                                title="Télécharger l'image"
-                              >
-                                <ImageIcon className="w-5 h-5" />
-                              </button>
-                              <button 
-                                onClick={() => generateSinglePreview(idx)}
-                                className="p-3 bg-black/50 backdrop-blur-md rounded-full hover:bg-orange-500 transition-colors"
-                                title="Régénérer l'image"
-                              >
-                                <Sparkles className="w-5 h-5" />
-                              </button>
-                            </div>
-                          </>
-                        ) : (
-                          <div className="w-full h-full flex flex-col items-center justify-center text-white/10 gap-4">
-                            <ImageIcon className="w-12 h-12" />
-                            <span className="text-[10px] uppercase tracking-widest font-bold">Aperçu Visuel</span>
-                            <button 
-                              onClick={() => generateSinglePreview(idx)}
-                              className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-full text-[10px] font-bold uppercase tracking-widest text-white/40 hover:text-orange-500 transition-all border border-white/10"
-                            >
-                              Générer
-                            </button>
-                          </div>
-                        )}
-                        <div className="absolute top-4 left-4 flex items-center gap-2 z-10">
-                          <div className="w-10 h-10 bg-orange-500 rounded-full flex items-center justify-center font-black text-xl shadow-2xl">
-                            {scene.number}
-                          </div>
-                          <div className="flex flex-col gap-0.5 bg-black/60 backdrop-blur-md rounded-lg p-0.5 border border-white/10 shadow-lg">
-                            <button
-                              type="button"
-                              onClick={() => moveScene(idx, 'up')}
-                              disabled={idx === 0}
-                              className="p-1 hover:bg-orange-500 rounded text-white/70 hover:text-white transition-all disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-white/70 cursor-pointer disabled:cursor-not-allowed"
-                              title="Monter la scène"
-                              aria-label="Monter la scène"
-                            >
-                              <ArrowUp className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => moveScene(idx, 'down')}
-                              disabled={idx === storyboard.scenes.length - 1}
-                              className="p-1 hover:bg-orange-500 rounded text-white/70 hover:text-white transition-all disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-white/70 cursor-pointer disabled:cursor-not-allowed"
-                              title="Descendre la scène"
-                              aria-label="Descendre la scène"
-                            >
-                              <ArrowDown className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
+                <div className="flex flex-wrap items-center gap-2.5">
+                  {/* Batch visuals */}
+                  <button
+                    type="button"
+                    onClick={generatePreviews}
+                    disabled={isGeneratingImages}
+                    className="px-4 py-2 bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] hover:border-orange-500/40 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    {isGeneratingImages ? <Loader2 className="w-3.5 h-3.5 animate-spin text-orange-400" /> : <Sparkles className="w-3.5 h-3.5 text-orange-400" />}
+                    <span>Tous les Visuels</span>
+                  </button>
 
-                      {/* Scene Details */}
-                      <div className="lg:col-span-8 flex flex-col justify-between py-2">
-                        {editingIdx === idx ? (
-                          <div className="space-y-6">
-                            <div className="flex items-center justify-between pb-3 border-b border-white/10">
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs font-bold uppercase tracking-wider text-orange-500">Mode Édition</span>
-                                <span className="text-xs text-white/40">• Scène {scene.number} sur {storyboard.scenes.length}</span>
-                              </div>
-                              <div className="flex items-center bg-white/5 border border-white/10 rounded-full p-0.5">
-                                <button
-                                  type="button"
-                                  onClick={() => moveScene(idx, 'up')}
-                                  disabled={idx === 0}
-                                  className="p-1.5 hover:bg-white/10 rounded-full transition-colors text-white/40 hover:text-orange-500 disabled:opacity-20 disabled:hover:text-white/40 disabled:hover:bg-transparent cursor-pointer disabled:cursor-not-allowed"
-                                  title="Monter la scène"
-                                  aria-label="Monter la scène"
-                                >
-                                  <ArrowUp className="w-4 h-4" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => moveScene(idx, 'down')}
-                                  disabled={idx === storyboard.scenes.length - 1}
-                                  className="p-1.5 hover:bg-white/10 rounded-full transition-colors text-white/40 hover:text-orange-500 disabled:opacity-20 disabled:hover:text-white/40 disabled:hover:bg-transparent cursor-pointer disabled:cursor-not-allowed"
-                                  title="Descendre la scène"
-                                  aria-label="Descendre la scène"
-                                >
-                                  <ArrowDown className="w-4 h-4" />
-                                </button>
-                              </div>
-                            </div>
-                            <div className="grid grid-cols-3 gap-4">
-                              <div>
-                                <label className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1 block">Durée</label>
-                                <input 
-                                  type="text" 
-                                  value={editForm.duration || ''} 
-                                  onChange={(e) => setEditForm({ ...editForm, duration: e.target.value })}
-                                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs focus:border-orange-500/50 outline-none"
-                                />
-                              </div>
-                              <div>
-                                <label className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1 block">Émotion</label>
-                                <input 
-                                  type="text" 
-                                  value={editForm.emotion || ''} 
-                                  onChange={(e) => setEditForm({ ...editForm, emotion: e.target.value })}
-                                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs focus:border-orange-500/50 outline-none"
-                                />
-                              </div>
-                              <div>
-                                <label className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1 block">Caméra</label>
-                                <input 
-                                  type="text" 
-                                  value={editForm.cameraMovement || ''} 
-                                  onChange={(e) => setEditForm({ ...editForm, cameraMovement: e.target.value })}
-                                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs focus:border-orange-500/50 outline-none"
-                                />
-                              </div>
-                            </div>
+                  {/* Batch audio */}
+                  <button
+                    type="button"
+                    onClick={generateVoiceovers}
+                    disabled={isGeneratingAudio}
+                    className="px-4 py-2 bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] hover:border-orange-500/40 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    {isGeneratingAudio ? <Loader2 className="w-3.5 h-3.5 animate-spin text-orange-400" /> : <Volume2 className="w-3.5 h-3.5 text-orange-400" />}
+                    <span>Toutes les Voix</span>
+                  </button>
 
-                            <div>
-                              <label className="text-[10px] font-bold uppercase tracking-widest text-orange-500 mb-1 block">Voix Off</label>
-                              <textarea 
-                                value={editForm.voiceover || ''} 
-                                onChange={(e) => setEditForm({ ...editForm, voiceover: e.target.value })}
-                                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-orange-500/50 outline-none h-20 resize-none"
-                              />
-                            </div>
+                  {/* Add Scene */}
+                  <button
+                    type="button"
+                    onClick={addScene}
+                    className="px-4 py-2 bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer"
+                    title="Ajouter un plan supplémentaire"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-orange-400" />
+                    <span>Ajouter Scène</span>
+                  </button>
 
-                            <div>
-                              <label className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1 block">Description Visuelle</label>
-                              <textarea 
-                                value={editForm.visualDescription || ''} 
-                                onChange={(e) => setEditForm({ ...editForm, visualDescription: e.target.value })}
-                                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-orange-500/50 outline-none h-20 resize-none"
-                              />
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-4">
-                              <div>
-                                <label className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1 block">Texte Écran</label>
-                                <input 
-                                  type="text" 
-                                  value={editForm.onScreenText || ''} 
-                                  onChange={(e) => setEditForm({ ...editForm, onScreenText: e.target.value })}
-                                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs focus:border-orange-500/50 outline-none"
-                                />
-                              </div>
-                              <div className="flex items-end gap-2">
-                                <button 
-                                  onClick={() => handleSaveScene(idx)}
-                                  className="flex-1 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold uppercase py-2 rounded-lg transition-colors"
-                                >
-                                  Enregistrer
-                                </button>
-                                <button 
-                                  onClick={() => setEditingIdx(null)}
-                                  className="px-4 bg-white/5 hover:bg-white/10 text-white text-xs font-bold uppercase py-2 rounded-lg transition-colors border border-white/10"
-                                >
-                                  Annuler
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        ) : (
-                          <div>
-                            <div className="flex flex-wrap items-center justify-between gap-4 mb-8">
-                              <div className="flex flex-wrap gap-4">
-                                <div className="flex items-center gap-2 px-3 py-1 bg-white/5 rounded-full text-[10px] font-bold uppercase tracking-wider border border-white/10">
-                                  <Clock className="w-3 h-3 text-orange-500" />
-                                  {scene.duration}
-                                </div>
-                                <div className="flex items-center gap-2 px-3 py-1 bg-white/5 rounded-full text-[10px] font-bold uppercase tracking-wider border border-white/10">
-                                  <Smile className="w-3 h-3 text-orange-500" />
-                                  {scene.emotion}
-                                </div>
-                                <div className="flex items-center gap-2 px-3 py-1 bg-white/5 rounded-full text-[10px] font-bold uppercase tracking-wider border border-white/10">
-                                  <Camera className="w-3 h-3 text-orange-500" />
-                                  {scene.cameraMovement}
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <div className="flex items-center bg-white/5 border border-white/10 rounded-full p-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => moveScene(idx, 'up')}
-                                    disabled={idx === 0}
-                                    className="p-1.5 hover:bg-white/10 rounded-full transition-all text-white/40 hover:text-orange-500 disabled:opacity-20 disabled:hover:text-white/40 disabled:hover:bg-transparent cursor-pointer disabled:cursor-not-allowed"
-                                    title="Monter la scène"
-                                    aria-label="Monter la scène"
-                                  >
-                                    <ArrowUp className="w-4 h-4" />
-                                  </button>
-                                  <span className="text-[10px] font-mono text-white/30 px-1 font-semibold">
-                                    {scene.number}/{storyboard.scenes.length}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => moveScene(idx, 'down')}
-                                    disabled={idx === storyboard.scenes.length - 1}
-                                    className="p-1.5 hover:bg-white/10 rounded-full transition-all text-white/40 hover:text-orange-500 disabled:opacity-20 disabled:hover:text-white/40 disabled:hover:bg-transparent cursor-pointer disabled:cursor-not-allowed"
-                                    title="Descendre la scène"
-                                    aria-label="Descendre la scène"
-                                  >
-                                    <ArrowDown className="w-4 h-4" />
-                                  </button>
-                                </div>
-                                <button 
-                                  onClick={() => handleEditScene(idx, scene)}
-                                  className="p-2 hover:bg-white/10 rounded-full transition-colors text-white/20 hover:text-orange-500"
-                                  title="Modifier la scène"
-                                >
-                                  <Clapperboard className="w-4 h-4" />
-                                </button>
-                              </div>
-                            </div>
-
-                            <div className="space-y-8">
-                              <section>
-                                <div className="flex items-center justify-between mb-2">
-                                  <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-orange-500">Voix Off</h4>
-                                  {scene.audioUrl && (
-                                    <button 
-                                      onClick={() => downloadFile(scene.audioUrl!, `voiceover-${scene.number}.mp3`)}
-                                      className="text-[10px] uppercase tracking-widest font-bold text-white/20 hover:text-orange-500 transition-colors flex items-center gap-1"
-                                    >
-                                      <Download className="w-3 h-3" /> Télécharger MP3
-                                    </button>
-                                  )}
-                                </div>
-                                <p className="text-2xl font-medium leading-tight">"{scene.voiceover}"</p>
-                                {scene.audioUrl && (
-                                  <SceneAudioPlayer url={scene.audioUrl} />
-                                )}
-                              </section>
-
-                              <section>
-                                <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/40 mb-2">Description Visuelle</h4>
-                                <p className="text-white/70 leading-relaxed">{scene.visualDescription}</p>
-                              </section>
-
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-6 border-t border-white/5">
-                                <section>
-                                  <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/40 mb-2 flex items-center gap-2">
-                                    <TypeIcon className="w-3 h-3" /> Texte à l'écran
-                                  </h4>
-                                  <p className="text-sm font-mono text-orange-500/80">{scene.onScreenText || "—"}</p>
-                                </section>
-                                <section>
-                                  <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/40 mb-2 flex items-center justify-between">
-                                    <span className="flex items-center gap-2"><Sparkles className="w-3 h-3" /> Prompt IA</span>
-                                    <button 
-                                      onClick={() => navigator.clipboard.writeText(scene.imagePrompt)}
-                                      className="hover:text-orange-500 transition-colors"
-                                      title="Copier le prompt"
-                                    >
-                                      <MousePointerClick className="w-3 h-3" />
-                                    </button>
-                                  </h4>
-                                  <p className="text-[10px] font-mono text-white/30 line-clamp-2 italic">{scene.imagePrompt}</p>
-                                </section>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </motion.div>
-                  ))}
+                  {/* Export PDF */}
+                  <button
+                    type="button"
+                    onClick={exportToPDF}
+                    disabled={isExporting}
+                    className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-md shadow-orange-500/20 flex items-center gap-1.5 cursor-pointer disabled:opacity-50 active:scale-95"
+                  >
+                    {isExporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                    <span>Exporter PDF</span>
+                  </button>
                 </div>
               </div>
-            </motion.div>
+
+              {/* Rendered Storyboard Cards */}
+              <div ref={storyboardRef} className="space-y-6">
+                {storyboard.scenes.map((scene, idx) => (
+                  <div
+                    key={scene.id || `scene-card-${idx}`}
+                    ref={(el) => {
+                      sceneElementsRef.current[idx] = el;
+                    }}
+                  >
+                    <SceneCard
+                      scene={scene}
+                      index={idx}
+                      totalScenes={storyboard.scenes.length}
+                      isRegenerating={regeneratingImages.has(idx)}
+                      isEditing={editingIdx === idx}
+                      onMove={moveScene}
+                      onDuplicate={duplicateScene}
+                      onDelete={deleteScene}
+                      onStartEdit={(i) => setEditingIdx(i)}
+                      onSaveEdit={handleSaveScene}
+                      onCancelEdit={() => setEditingIdx(null)}
+                      onRegenerateImage={generateSinglePreview}
+                      onOpenImageModal={(sc) => setSelectedModalScene(sc)}
+                      onDownload={downloadFile}
+                    />
+                  </div>
+                ))}
+              </div>
+
+            </motion.section>
           )}
         </AnimatePresence>
 
         {/* Empty State */}
         {!storyboard && !isGenerating && (
-          <div className="py-20 flex flex-col items-center justify-center text-center border-2 border-dashed border-white/5 rounded-[3rem]">
-            <Film className="w-16 h-16 text-white/10 mb-6" />
-            <h3 className="text-xl font-bold mb-2">Prêt pour votre prochain chef-d'œuvre ?</h3>
-            <p className="text-white/30 max-w-sm">
-              Entrez votre narration ci-dessus pour commencer la création de votre storyboard.
+          <div className="py-16 sm:py-20 flex flex-col items-center justify-center text-center border-2 border-dashed border-white/[0.06] rounded-3xl bg-white/[0.01]">
+            <div className="w-16 h-16 rounded-2xl bg-white/[0.03] border border-white/[0.06] flex items-center justify-center text-white/20 mb-4">
+              <Film className="w-8 h-8" />
+            </div>
+            <h3 className="text-lg sm:text-xl font-bold font-display text-white mb-1.5">
+              Prêt pour votre prochain court-métrage ou vidéo virale ?
+            </h3>
+            <p className="text-white/40 text-xs sm:text-sm max-w-md">
+              Choisissez l'un des exemples ci-dessus ou collez votre script pour lancer le réalisateur IA.
             </p>
           </div>
         )}
+
       </main>
 
-      {/* Footer */}
-      <footer className="py-20 border-t border-white/10 mt-20">
-        <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-8">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center font-black">AI</div>
-            <span className="font-bold tracking-tighter uppercase">Director Pro</span>
+      {/* Fullscreen 9:16 Image Lightbox Modal */}
+      {selectedModalScene && (
+        <ImageModal
+          scene={selectedModalScene}
+          totalScenes={storyboard?.scenes.length || 0}
+          onClose={() => setSelectedModalScene(null)}
+          onPrev={() => {
+            if (!storyboard) return;
+            const curIdx = storyboard.scenes.findIndex(s => s.number === selectedModalScene.number);
+            if (curIdx > 0) setSelectedModalScene(storyboard.scenes[curIdx - 1]);
+          }}
+          onNext={() => {
+            if (!storyboard) return;
+            const curIdx = storyboard.scenes.findIndex(s => s.number === selectedModalScene.number);
+            if (curIdx < storyboard.scenes.length - 1) setSelectedModalScene(storyboard.scenes[curIdx + 1]);
+          }}
+          onDownload={downloadFile}
+        />
+      )}
+
+      {/* Modern Studio Footer */}
+      <footer className="py-8 border-t border-white/[0.06] bg-[#05060a] mt-auto">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-orange-500/20 border border-orange-500/30 flex items-center justify-center text-orange-400 font-bold text-xs">
+              AI
+            </div>
+            <span className="text-xs font-bold tracking-tight text-white/80 font-display uppercase">
+              AI Director Studio • 9:16 Vertical Engine
+            </span>
           </div>
-          <p className="text-white/20 text-xs tracking-widest uppercase">
-            © 2026 AI Studio Build • Cinematic Storytelling Engine
+          <p className="text-white/30 text-xs font-mono">
+            Powered by Gemini 3.1 Pro & 2.5 Flash
           </p>
         </div>
       </footer>
+
     </div>
   );
 }
