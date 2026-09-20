@@ -2,36 +2,36 @@ import { PresetStory, VisualStyle } from '../types';
 
 export const PRESET_STORIES: PresetStory[] = [
   {
+    id: 'l-horloger-du-temps',
+    title: "L'Horloger d'Édimbourg",
+    tag: 'Drame Fantastique / Époque',
+    icon: 'Compass',
+    mood: 'Mystique & Émotionnel',
+    text: "Hiver 1892, dans les ruelles pavées d'Édimbourg balayées par un blizzard glacial. Arthur Vance, un vieil horloger solitaire aux mains tremblantes, conserve dans son atelier secret une montre à gousset dorée aux engrenages inversés : le Chronomètre d'Ouroboros. Soudain, la porte s'ouvre avec fracas. Éléonore, sa petite-fille qu'il croyait perdue en mer depuis cinq ans, franchit le seuil, vêtue d'un manteau trempé. Ses yeux brillent d'une lueur étrange. « Grand-père, murmure-t-elle d'une voix brisée, ils ont retrouvé la trace du mécanisme. Tu dois remonter l'aiguille avant le douzième coup. » Au loin, les sabots d'une calèche noire s'arrêtent devant la vitrine embuée. Arthur saisit l'artefact alors que les rouages s'emballent dans une étincelle azur."
+  },
+  {
     id: 'mystere-nocturne',
-    title: 'Mystère Nocturne',
+    title: 'Le Testament de minuit',
     tag: 'Thriller / Néo-Noir',
     icon: 'Moon',
     mood: 'Sombre & Suspense',
-    text: "La pluie s'abattait sans pitié sur les pavés luisants de la vieille ville. Une silhouette solitaire attendait sous le réverbère vacillant, une enveloppe scellée à la main. Le clocher sonna minuit. C'est à cet instant précis que les phares ont surgi du brouillard."
-  },
-  {
-    id: 'luxe-parfum',
-    title: 'Essence d’Or',
-    tag: 'Spot Publicitaire Luxe',
-    icon: 'Sparkles',
-    mood: 'Élégant & Sensoriel',
-    text: "Une goutte d'eau perle sur un pétale de rose pourpre à l'aube. Dans un palazzo vénitien baigné de soleil doré, elle s'élance, traînant une robe en soie mordorée. Un regard vers la lagune, un souffle : l'instant où le temps s'arrête."
-  },
-  {
-    id: 'odyssee-nature',
-    title: 'Le Sanctuaire Sauvage',
-    tag: 'Documentaire Nature',
-    icon: 'Compass',
-    mood: 'Épique & Poétique',
-    text: "Au sommet des crêtes islandaises, le vent hurle une mélodie ancestrale. Les aurores boréales sculptent le ciel de rubans émeraude au-dessus d'un glacier millénaire. Une renarde polaire émerge de la brume, sentinelle d'un monde intouché."
+    text: "Novembre 1954, quai de la Seine sous une pluie battante. L'inspecteur Gabriel Moreau attend sous un réverbère clignotant, serrant une sacoche en cuir renfermant les aveux du préfet. Une silhouette élégante émerge des ombres : Clara Delacroix, ancienne cantatrice devenue informatrice clandestine. « Gabriel, tu n'aurais jamais dû venir seul », souffle-t-elle en lui tendant un revolver au barillet vide. Deux phares aveuglants déchirent alors le brouillard, accompagnés par le rugissement d'une Traction Avant. Gabriel doit choisir entre sauver Clara ou plonger dans les eaux glacées pour protéger les preuves."
   },
   {
     id: 'future-cyber',
-    title: 'Néo-Tokyo 2099',
+    title: 'La Brèche de Neo-Sora',
     tag: 'Sci-Fi / Cyberpunk',
     icon: 'Zap',
-    mood: 'Futuriste & Rythmé',
-    text: "Entre les gratte-ciel vertigineux baignés d'hologrammes criards, elle active sa visière neurale. Le trafic de navettes magnétiques glisse dans la pluie acide. Un compte à rebours clignote sur sa rétine : '5 secondes avant la brèche'."
+    mood: 'Futuriste & Haletant',
+    text: "An 2114, dans les bas-fonds de Neo-Sora illuminés par des néons holographiques géants. Maya Kross, une hackeuse renégate aux implants cybernétiques instables, transporte dans une cyber-mallette cryogénisée la dernière graine végétale vivante de la Terre. Traquée par les drones sentinelles du Consortium Apex, elle s'engouffre dans un hangar abandonné. Son ancien complice Ren l'attend sur une passerelle rouillée, arme pointée sur elle. « Donne-moi la graine Maya, et ils effaceront ta prime », ordonne-t-il. Maya active sa visière neurale : « Cette graine n'appartient à personne, Ren. Elle appartient au ciel. » Maya déclenche une grenade IEM, plongeant tout le secteur dans le noir total."
+  },
+  {
+    id: 'odyssee-nature',
+    title: 'Le Sanctuaire du Silence',
+    tag: 'Aventure / Épique',
+    icon: 'Sparkles',
+    mood: 'Épique & Poétique',
+    text: "Aux confins des hauts plateaux de l'Himalaya, à l'aube d'un solstice d'été. Tenzin, un jeune moine herboriste, grimpe vers la falaise des Mille Prières pour cueillir la légendaire Fleur de Jade, réputée capable de guérir le mal mystérieux qui frappe son village natal. Face à lui, sur une corniche vertigineuse, apparaît un léopard des neiges aux yeux d'or, gardien séculaire du sanctuaire. Au lieu de fuir, Tenzin s'agenouille, pose son bâton de pèlerin et entonne le chant ancestral de paix. L'animal s'approche doucement, flairant la clochette en cuivre du novice avant de s'écarter pour révéler la fleur baignée par les premiers rayons du soleil."
   }
 ];
 
