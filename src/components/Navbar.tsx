@@ -16,10 +16,12 @@ export const Navbar: React.FC<NavbarProps> = ({
   onReset,
 }) => {
   const totalDuration = storyboard
-    ? storyboard.scenes.reduce((acc, sc) => {
-        const match = sc.duration.match(/\d+/);
-        return acc + (match ? parseInt(match[0], 10) : 4);
-      }, 0)
+    ? Math.round(
+        storyboard.scenes.reduce((acc, sc) => {
+          const match = sc.duration?.match(/\d+(\.\d+)?/);
+          return acc + (match ? parseFloat(match[0]) : 4);
+        }, 0)
+      )
     : 0;
 
   return (

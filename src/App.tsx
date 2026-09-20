@@ -15,7 +15,9 @@ import {
   CheckCircle2,
   Volume2,
   Trash2,
-  Wand2
+  Wand2,
+  Clock,
+  Timer
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { jsPDF } from "jspdf";
@@ -53,6 +55,7 @@ export default function App() {
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [selectedModalScene, setSelectedModalScene] = useState<Scene | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [targetTotalDuration, setTargetTotalDuration] = useState<number | null>(null);
 
   const storyboardRef = useRef<HTMLDivElement>(null);
   const sceneElementsRef = useRef<{ [key: number]: HTMLDivElement | null }>({});
@@ -346,6 +349,7 @@ Réponds STRICTEMENT au format JSON avec cette structure :
       ...storyboard,
       scenes: renumbered,
     });
+    setTargetTotalDuration(null);
   };
 
   const deleteScene = (index: number) => {
@@ -360,6 +364,7 @@ Réponds STRICTEMENT au format JSON avec cette structure :
       ...storyboard,
       scenes: renumbered,
     });
+    setTargetTotalDuration(null);
 
     if (editingIdx === index) {
       setEditingIdx(null);
@@ -386,6 +391,7 @@ Réponds STRICTEMENT au format JSON avec cette structure :
       scenes: [...storyboard.scenes, newScene],
     });
     setEditingIdx(storyboard.scenes.length);
+    setTargetTotalDuration(null);
   };
 
   const handleSaveScene = (idx: number, updatedData: Partial<Scene>) => {
@@ -394,6 +400,93 @@ Réponds STRICTEMENT au format JSON avec cette structure :
     updatedScenes[idx] = { ...updatedScenes[idx], ...updatedData } as Scene;
     setStoryboard({ ...storyboard, scenes: updatedScenes });
     setEditingIdx(null);
+    setTargetTotalDuration(null);
+  };
+
+  // Helper to calculate total duration in seconds from an array of scenes
+  const calculateTotalDuration = (scenes: Scene[]): number => {
+    return scenes.reduce((acc, sc) => {
+      const match = sc.duration?.match(/\d+(\.\d+)?/);
+      return acc + (match ? parseFloat(match[0]) : 4);
+    }, 0);
+  };
+
+  // Proportional distribution of targetSeconds across all scenes
+  const distributeDurationToScenes = (scenes: Scene[], targetSeconds: number): Scene[] => {
+    const count = scenes.length;
+    if (count === 0) return scenes;
+
+    // Relative weights based on voiceover word count and/or existing duration
+    const weights = scenes.map((s) => {
+      const words = (s.voiceover || '').trim().split(/\s+/).filter(Boolean).length;
+      const match = s.duration?.match(/\d+(\.\d+)?/);
+      const parsed = match ? parseFloat(match[0]) : 0;
+      if (words > 0 && parsed > 0) {
+        return parsed * 0.35 + words * 0.65;
+      }
+      if (words > 0) return Math.max(2, words);
+      if (parsed > 0) return parsed;
+      return 4;
+    });
+
+    const totalWeight = weights.reduce((a, b) => a + b, 0) || 1;
+    const minPerScene = Math.max(1, Math.min(2, Math.floor((targetSeconds / count) * 10) / 10));
+
+    // Compute raw durations rounded to 0.5s increments
+    let rawDurations = weights.map((w) =>
+      Math.max(minPerScene, Math.round(((w / totalWeight) * targetSeconds) * 2) / 2)
+    );
+
+    let currentSum = rawDurations.reduce((a, b) => a + b, 0);
+    let diff = Math.round((targetSeconds - currentSum) * 10) / 10;
+
+    let safety = 0;
+    while (Math.abs(diff) >= 0.25 && safety < 100) {
+      safety++;
+      if (diff > 0) {
+        let bestIdx = 0;
+        let bestScore = -Infinity;
+        for (let i = 0; i < count; i++) {
+          const score = weights[i] / (rawDurations[i] + 0.1);
+          if (score > bestScore) {
+            bestScore = score;
+            bestIdx = i;
+          }
+        }
+        rawDurations[bestIdx] = Math.round((rawDurations[bestIdx] + 0.5) * 10) / 10;
+      } else {
+        let bestIdx = -1;
+        let bestScore = -Infinity;
+        for (let i = 0; i < count; i++) {
+          if (rawDurations[i] > minPerScene) {
+            const score = rawDurations[i] / (weights[i] + 0.1);
+            if (score > bestScore) {
+              bestScore = score;
+              bestIdx = i;
+            }
+          }
+        }
+        if (bestIdx === -1) break;
+        rawDurations[bestIdx] = Math.max(minPerScene, Math.round((rawDurations[bestIdx] - 0.5) * 10) / 10);
+      }
+      currentSum = rawDurations.reduce((a, b) => a + b, 0);
+      diff = Math.round((targetSeconds - currentSum) * 10) / 10;
+    }
+
+    return scenes.map((scene, i) => ({
+      ...scene,
+      duration: `${rawDurations[i]}s`,
+    }));
+  };
+
+  const handleGlobalDurationChange = (newTargetSeconds: number) => {
+    if (!storyboard) return;
+    setTargetTotalDuration(newTargetSeconds);
+    const updatedScenes = distributeDurationToScenes(storyboard.scenes, newTargetSeconds);
+    setStoryboard({
+      ...storyboard,
+      scenes: updatedScenes,
+    });
   };
 
   const downloadFile = (url: string, filename: string) => {
@@ -442,6 +535,16 @@ Réponds STRICTEMENT au format JSON avec cette structure :
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   };
+
+  // Derived duration metrics for the active storyboard
+  const sceneCount = storyboard ? storyboard.scenes.length : 0;
+  const currentTotalSeconds = storyboard ? Math.round(calculateTotalDuration(storyboard.scenes)) : 30;
+  const activeTargetDuration = targetTotalDuration ?? currentTotalSeconds;
+  const minTotalDuration = Math.max(10, Math.round(sceneCount * 2));
+  const maxTotalDuration = Math.max(60, Math.round(sceneCount * 10));
+  const availablePresets = [15, 30, 45, 60].filter(
+    (preset) => preset >= minTotalDuration && preset <= maxTotalDuration
+  );
 
   return (
     <div className="min-h-screen bg-[#07080d] text-slate-100 font-sans flex flex-col selection:bg-orange-500/30 selection:text-orange-200">
@@ -687,58 +790,141 @@ Réponds STRICTEMENT au format JSON avec cette structure :
                 onSelectScene={handleScrollToScene}
               />
 
-              {/* Master Control Bar */}
-              <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-[#0b0c14] border border-white/[0.08] rounded-2xl shadow-xl">
-                <div className="flex items-center gap-3">
-                  <h2 className="text-xl sm:text-2xl font-black font-display text-white">
-                    Plans Séquences ({storyboard.scenes.length})
-                  </h2>
+              {/* Master Control Bar with Global Duration Slider */}
+              <div 
+                id="plans-sequences-master-bar"
+                className="p-4 sm:p-5 bg-[#0b0c14] border border-white/[0.08] rounded-2xl sm:rounded-3xl shadow-xl space-y-4"
+              >
+                {/* Top Row: Title, Total Badge, and Batch Actions */}
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <h2 className="text-xl sm:text-2xl font-black font-display text-white">
+                      Plans Séquences ({storyboard.scenes.length})
+                    </h2>
+                    <div className="flex items-center gap-1.5 px-3 py-1 bg-orange-500/10 border border-orange-500/25 rounded-full text-xs font-mono text-orange-400 font-bold">
+                      <Clock className="w-3.5 h-3.5" />
+                      <span>Durée Totale : {activeTargetDuration}s</span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    {/* Batch visuals */}
+                    <button
+                      type="button"
+                      onClick={generatePreviews}
+                      disabled={isGeneratingImages}
+                      className="px-4 py-2 bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] hover:border-orange-500/40 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      {isGeneratingImages ? <Loader2 className="w-3.5 h-3.5 animate-spin text-orange-400" /> : <Sparkles className="w-3.5 h-3.5 text-orange-400" />}
+                      <span>Tous les Visuels</span>
+                    </button>
+
+                    {/* Batch audio */}
+                    <button
+                      type="button"
+                      onClick={generateVoiceovers}
+                      disabled={isGeneratingAudio}
+                      className="px-4 py-2 bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] hover:border-orange-500/40 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      {isGeneratingAudio ? <Loader2 className="w-3.5 h-3.5 animate-spin text-orange-400" /> : <Volume2 className="w-3.5 h-3.5 text-orange-400" />}
+                      <span>Toutes les Voix</span>
+                    </button>
+
+                    {/* Add Scene */}
+                    <button
+                      type="button"
+                      onClick={addScene}
+                      className="px-4 py-2 bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer"
+                      title="Ajouter un plan supplémentaire"
+                    >
+                      <Plus className="w-3.5 h-3.5 text-orange-400" />
+                      <span>Ajouter Scène</span>
+                    </button>
+
+                    {/* Export PDF */}
+                    <button
+                      type="button"
+                      onClick={exportToPDF}
+                      disabled={isExporting}
+                      className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-md shadow-orange-500/20 flex items-center gap-1.5 cursor-pointer disabled:opacity-50 active:scale-95"
+                    >
+                      {isExporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                      <span>Exporter PDF</span>
+                    </button>
+                  </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2.5">
-                  {/* Batch visuals */}
-                  <button
-                    type="button"
-                    onClick={generatePreviews}
-                    disabled={isGeneratingImages}
-                    className="px-4 py-2 bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] hover:border-orange-500/40 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                  >
-                    {isGeneratingImages ? <Loader2 className="w-3.5 h-3.5 animate-spin text-orange-400" /> : <Sparkles className="w-3.5 h-3.5 text-orange-400" />}
-                    <span>Tous les Visuels</span>
-                  </button>
+                {/* Global Scene Duration Adjuster (Slider) */}
+                <div 
+                  id="global-duration-slider-section"
+                  className="pt-3.5 border-t border-white/[0.06] flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4 bg-white/[0.02] p-3.5 sm:p-4 rounded-xl border border-white/[0.04]"
+                >
+                  {/* Slider explanation & badge */}
+                  <div className="flex items-center gap-3 min-w-[210px]">
+                    <div className="w-9 h-9 rounded-xl bg-orange-500/15 border border-orange-500/30 flex items-center justify-center text-orange-400 flex-shrink-0">
+                      <Sliders className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold uppercase tracking-wider text-white">
+                          Ajuster Durée Globale
+                        </span>
+                        <span className="text-[11px] font-mono text-orange-400 font-bold bg-orange-500/10 px-1.5 py-0.2 rounded border border-orange-500/20">
+                          {activeTargetDuration}s
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-white/50 leading-tight">
+                        ~{(activeTargetDuration / (sceneCount || 1)).toFixed(1)}s en moyenne par plan • Ajuste tous les plans
+                      </p>
+                    </div>
+                  </div>
 
-                  {/* Batch audio */}
-                  <button
-                    type="button"
-                    onClick={generateVoiceovers}
-                    disabled={isGeneratingAudio}
-                    className="px-4 py-2 bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] hover:border-orange-500/40 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                  >
-                    {isGeneratingAudio ? <Loader2 className="w-3.5 h-3.5 animate-spin text-orange-400" /> : <Volume2 className="w-3.5 h-3.5 text-orange-400" />}
-                    <span>Toutes les Voix</span>
-                  </button>
+                  {/* Range Slider Track */}
+                  <div className="flex-1 flex items-center gap-3 max-w-xl">
+                    <span className="text-xs font-mono text-white/40 w-7 text-right select-none">{minTotalDuration}s</span>
+                    <div className="relative flex-1 flex items-center">
+                      <input
+                        id="global-video-duration-slider"
+                        type="range"
+                        min={minTotalDuration}
+                        max={maxTotalDuration}
+                        step={1}
+                        value={activeTargetDuration}
+                        onChange={(e) => handleGlobalDurationChange(Number(e.target.value))}
+                        className="w-full h-2 bg-white/10 rounded-lg appearance-none cursor-pointer accent-orange-500 hover:accent-orange-400 focus:outline-none focus:ring-2 focus:ring-orange-500/40 transition-all"
+                        aria-label="Ajuster la durée totale de la vidéo"
+                      />
+                    </div>
+                    <span className="text-xs font-mono text-white/40 w-7 select-none">{maxTotalDuration}s</span>
 
-                  {/* Add Scene */}
-                  <button
-                    type="button"
-                    onClick={addScene}
-                    className="px-4 py-2 bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer"
-                    title="Ajouter un plan supplémentaire"
-                  >
-                    <Plus className="w-3.5 h-3.5 text-orange-400" />
-                    <span>Ajouter Scène</span>
-                  </button>
+                    {/* Target Seconds Badge */}
+                    <div className="px-2.5 py-1 bg-gradient-to-r from-orange-500 to-amber-500 text-white text-xs font-black font-mono rounded-lg shadow-md shadow-orange-500/20 min-w-[44px] text-center select-none">
+                      {activeTargetDuration}s
+                    </div>
+                  </div>
 
-                  {/* Export PDF */}
-                  <button
-                    type="button"
-                    onClick={exportToPDF}
-                    disabled={isExporting}
-                    className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-md shadow-orange-500/20 flex items-center gap-1.5 cursor-pointer disabled:opacity-50 active:scale-95"
-                  >
-                    {isExporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                    <span>Exporter PDF</span>
-                  </button>
+                  {/* Target Video Length Presets */}
+                  {availablePresets.length > 0 && (
+                    <div className="flex items-center gap-1.5 self-end lg:self-auto flex-wrap">
+                      <span className="text-[10px] uppercase font-bold text-white/40 mr-1 hidden sm:inline">Presets :</span>
+                      {availablePresets.map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          id={`preset-duration-${preset}s`}
+                          onClick={() => handleGlobalDurationChange(preset)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer border ${
+                            activeTargetDuration === preset
+                              ? 'bg-orange-500 text-white border-orange-500 shadow-sm shadow-orange-500/30 ring-1 ring-orange-400/50'
+                              : 'bg-white/[0.04] text-white/60 border-white/[0.08] hover:bg-white/[0.08] hover:text-white'
+                          }`}
+                          title={`Ajuster la durée totale à ${preset} secondes`}
+                        >
+                          {preset}s
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
