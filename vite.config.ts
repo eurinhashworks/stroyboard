@@ -2,11 +2,23 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig, loadEnv} from 'vite';
+import { projectsApiMiddleware } from './src/server/apiMiddleware';
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      react(), 
+      tailwindcss(),
+      {
+        name: 'projects-api-server',
+        configureServer(server) {
+          server.middlewares.use((req, res, next) => {
+            projectsApiMiddleware(req, res, next);
+          });
+        }
+      }
+    ],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
     },

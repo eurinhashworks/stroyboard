@@ -1,0 +1,83 @@
+[
+  {
+    "id": "proj-mystere-nocturne",
+    "title": "Mystère Nocturne - Bande Annonce",
+    "description": "Une enquête sombre sous la pluie battante dans les rues pavées d'une vieille cité européenne.",
+    "contentType": "court-metrage",
+    "format": "16:9",
+    "language": "fr",
+    "visualStyleId": "film-noir",
+    "status": "completed",
+    "targetTotalDuration": 24,
+    "narration": "La pluie s'abattait sans pitié sur les pavés luisants de la vieille ville. Une silhouette solitaire attendait sous le réverbère vacillant, une enveloppe scellée à la main. Le clocher sonna minuit. C'est à cet instant précis que les phares ont surgi du brouillard.",
+    "storyboard": {
+      "scenes": [
+        {
+          "id": "sc-1",
+          "number": 1,
+          "voiceover": "La pluie s'abattait sans pitié sur les pavés luisants de la vieille ville.",
+          "visualDescription": "Vue en plongée des ruelles sombres aux pavés mouillés reflétant les néons lointains.",
+          "imagePrompt": "Cinematic wide angle shot of dark European cobblestone alleyway in heavy rain, puddles reflecting dim warm streetlights, neo-noir atmosphere, 16:9 aspect ratio, 35mm film grain, 8k resolution.",
+          "onScreenText": "MINUIT MOINS CINQ",
+          "emotion": "Suspense",
+          "cameraMovement": "Travelling avant lent",
+          "duration": "4.5s"
+        },
+        {
+          "id": "sc-2",
+          "number": 2,
+          "voiceover": "Une silhouette solitaire attendait sous le réverbère vacillant, une enveloppe scellée à la main.",
+          "visualDescription": "Plan moyen sur un homme en trench coat sombre, tenant une mystérieuse enveloppe en cire rouge.",
+          "imagePrompt": "Medium shot of mysterious figure wearing a dark trench coat standing under a flickering vintage street lamp, holding a sealed envelope with red wax, rain dripping, heavy shadows, cinematic lighting, 16:9 framing.",
+          "onScreenText": "LE RENDEZ-VOUS",
+          "emotion": "Mystère",
+          "cameraMovement": "Contre-plongée lente",
+          "duration": "5s"
+        },
+        {
+          "id": "sc-3",
+          "number": 3,
+          "voiceover": "Le clocher sonna minuit. C'est à cet instant précis que les phares ont surgi du brouillard.",
+          "visualDescription": "Deux faisceaux de phares aveuglants transpercent l'épaisse brume nocturne vers la silhouette.",
+          "imagePrompt": "Dramatic cinematic shot of blinding car headlights piercing through thick night fog in a wet alleyway, silhouette in backlight, anamorphic lens flares, suspenseful noir climax, 16:9 ratio.",
+          "onScreenText": "L'IMPACT",
+          "emotion": "Tension",
+          "cameraMovement": "Zoom rapide vers l'avant",
+          "duration": "4.5s"
+        }
+      ],
+      "recommendedMusic": "Violons sombres et cordes oppressantes crescendo",
+      "finalCTA": "Découvrez le mystère en salle dès le 12 octobre"
+    },
+    "createdAt": "2026-09-19T14:30:00.000Z",
+    "updatedAt": "2026-09-20T08:15:00.000Z"
+  },
+  {
+    "id": "proj-essence-or",
+    "title": "Essence d'Or - Campagne Luxe",
+    "description": "Spot promotionnel vertical pour le lancement du nouveau parfum d'exception.",
+    "contentType": "tiktok",
+    "format": "9:16",
+    "language": "fr",
+    "visualStyleId": "cinematic-35mm",
+    "status": "in_progress",
+    "targetTotalDuration": 18,
+    "narration": "Une goutte d'eau perle sur un pétale de rose pourpre à l'aube. Dans un palazzo vénitien baigné de soleil doré, elle s'élance, traînant une robe en soie mordorée. Un regard vers la lagune, un souffle : l'instant où le temps s'arrête.",
+    "createdAt": "2026-09-18T10:00:00.000Z",
+    "updatedAt": "2026-09-19T18:45:00.000Z"
+  },
+  {
+    "id": "proj-sanctuaire-sauvage",
+    "title": "Le Sanctuaire Sauvage",
+    "description": "Documentaire animalier et contemplation des aurores boréales sur glaciers.",
+    "contentType": "documentaire",
+    "format": "16:9",
+    "language": "fr",
+    "visualStyleId": "documentaire",
+    "status": "draft",
+    "targetTotalDuration": 30,
+    "narration": "Au sommet des crêtes islandaises, le vent hurle une mélodie ancestrale. Les aurores boréales sculptent le ciel de rubans émeraude au-dessus d'un glacier millénaire. Une renarde polaire émerge de la brume, sentinelle d'un monde intouché.",
+    "createdAt": "2026-09-15T09:20:00.000Z",
+    "updatedAt": "2026-09-16T11:10:00.000Z"
+  }
+]

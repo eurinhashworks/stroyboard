@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
 import { 
   Clapperboard, 
@@ -17,15 +17,28 @@ import {
   Trash2,
   Wand2,
   Clock,
-  Timer
+  Timer,
+  ArrowLeft,
+  Edit3,
+  Save,
+  Check,
+  AlertCircle,
+  Smartphone,
+  Monitor,
+  Square,
+  Layers
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { jsPDF } from "jspdf";
 import { domToPng } from 'modern-screenshot';
 
-import { Scene, Storyboard, VisualStyle } from './types';
+import { Scene, Storyboard, VisualStyle, Project, ProjectFormData } from './types';
 import { PRESET_STORIES, VISUAL_STYLES } from './data/presets';
+import { projectsApi } from './services/projectsApi';
 import { Navbar } from './components/Navbar';
+import { ProjectsHub } from './components/ProjectsHub';
+import { ProjectModal } from './components/ProjectModal';
+import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { AudioPlayer } from './components/AudioPlayer';
 import { SceneCard } from './components/SceneCard';
 import { DirectorMonitor } from './components/DirectorMonitor';
@@ -38,12 +51,160 @@ const IMAGE_MODEL = "gemini-2.5-flash-image";
 const TTS_MODEL = "gemini-2.5-flash-preview-tts";
 
 export default function App() {
+  // Project Management states
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [activeProject, setActiveProject] = useState<Project | null>(null);
+  const [currentView, setCurrentView] = useState<'projects' | 'studio'>('projects');
+  const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
+  const [projectModalMode, setProjectModalMode] = useState<'create' | 'edit'>('create');
+  const [projectToEdit, setProjectToEdit] = useState<Project | null>(null);
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isSavingProject, setIsSavingProject] = useState(false);
+  const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  // Storyboard Creation & Studio states
   const [narration, setNarration] = useState('');
   const [selectedStyle, setSelectedStyle] = useState<VisualStyle>(VISUAL_STYLES[0]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const [storyboard, setStoryboard] = useState<Storyboard | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Load persistent projects on mount
+  useEffect(() => {
+    const loadProjects = async () => {
+      try {
+        const list = await projectsApi.getAll();
+        setProjects(list);
+        if (list.length > 0 && !activeProject) {
+          setActiveProject(list[0]);
+        }
+      } catch (err) {
+        console.error('Failed to load projects:', err);
+      }
+    };
+    loadProjects();
+  }, []);
+
+  const showToast = (text: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToastMessage({ text, type });
+    setTimeout(() => {
+      setToastMessage(prev => (prev?.text === text ? null : prev));
+    }, 3500);
+  };
+
+  // Project Action Handlers
+  const handleSelectProject = (project: Project) => {
+    setActiveProject(project);
+    setNarration(project.narration || '');
+    setStoryboard(project.storyboard || null);
+    const matchedStyle = VISUAL_STYLES.find(s => s.id === project.visualStyleId) || VISUAL_STYLES[0];
+    setSelectedStyle(matchedStyle);
+    setTargetTotalDuration(project.targetTotalDuration || null);
+    setCurrentView('studio');
+    showToast(`Projet « ${project.title} » ouvert dans le Studio.`, 'info');
+  };
+
+  const handleOpenCreateProject = () => {
+    setProjectToEdit(null);
+    setProjectModalMode('create');
+    setIsProjectModalOpen(true);
+  };
+
+  const handleOpenEditProject = (project: Project) => {
+    setProjectToEdit(project);
+    setProjectModalMode('edit');
+    setIsProjectModalOpen(true);
+  };
+
+  const handleSaveProjectForm = async (formData: ProjectFormData) => {
+    if (projectModalMode === 'create') {
+      const created = await projectsApi.create(formData);
+      setProjects(prev => [created, ...prev.filter(p => p.id !== created.id)]);
+      setActiveProject(created);
+      setNarration('');
+      setStoryboard(null);
+      const matchedStyle = VISUAL_STYLES.find(s => s.id === created.visualStyleId) || VISUAL_STYLES[0];
+      setSelectedStyle(matchedStyle);
+      setTargetTotalDuration(null);
+      setCurrentView('studio');
+      showToast(`Projet « ${created.title} » créé avec succès !`);
+    } else if (projectToEdit) {
+      const updated = await projectsApi.update(projectToEdit.id, formData);
+      setProjects(prev => prev.map(p => (p.id === updated.id ? updated : p)));
+      if (activeProject?.id === updated.id) {
+        setActiveProject(updated);
+        const matchedStyle = VISUAL_STYLES.find(s => s.id === updated.visualStyleId) || selectedStyle;
+        setSelectedStyle(matchedStyle);
+      }
+      showToast(`Projet « ${updated.title} » mis à jour !`);
+    }
+  };
+
+  const handleDuplicateProject = async (project: Project) => {
+    try {
+      const cloned = await projectsApi.duplicate(project.id);
+      setProjects(prev => [cloned, ...prev]);
+      showToast(`Projet dupliqué : « ${cloned.title} »`);
+    } catch (err: any) {
+      showToast(err?.message || 'Erreur lors de la duplication', 'error');
+    }
+  };
+
+  const handleOpenDeleteModal = (project: Project) => {
+    setProjectToDelete(project);
+    setIsDeleteModalOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!projectToDelete) return;
+    setIsDeleting(true);
+    try {
+      await projectsApi.delete(projectToDelete.id);
+      setProjects(prev => prev.filter(p => p.id !== projectToDelete.id));
+      if (activeProject?.id === projectToDelete.id) {
+        const remaining = projects.filter(p => p.id !== projectToDelete.id);
+        setActiveProject(remaining[0] || null);
+        if (remaining.length === 0) {
+          setStoryboard(null);
+          setNarration('');
+        }
+      }
+      showToast(`Projet « ${projectToDelete.title} » supprimé.`);
+      setIsDeleteModalOpen(false);
+      setProjectToDelete(null);
+    } catch (err: any) {
+      showToast(err?.message || 'Erreur lors de la suppression', 'error');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleSaveActiveProjectStoryboard = async () => {
+    if (!activeProject) {
+      handleOpenCreateProject();
+      return;
+    }
+    setIsSavingProject(true);
+    try {
+      const updated = await projectsApi.update(activeProject.id, {
+        narration,
+        storyboard: storyboard || undefined,
+        visualStyleId: selectedStyle.id,
+        targetTotalDuration: targetTotalDuration || undefined,
+        status: storyboard ? 'completed' : 'in_progress'
+      });
+      setActiveProject(updated);
+      setProjects(prev => prev.map(p => (p.id === updated.id ? updated : p)));
+      showToast(`Projet « ${updated.title} » sauvegardé en base de données !`);
+    } catch (err: any) {
+      showToast(err?.message || 'Erreur lors de la sauvegarde', 'error');
+    } finally {
+      setIsSavingProject(false);
+    }
+  };
 
   // Media generation states
   const [isGeneratingImages, setIsGeneratingImages] = useState(false);
@@ -83,19 +244,22 @@ export default function App() {
           {
             role: "user",
             parts: [{ 
-              text: `Tu es un réalisateur et directeur artistique d'élite, spécialisé dans la création de vidéos courtes ultra-cinématographiques pour les réseaux sociaux (TikTok, Instagram Reels, Shorts au format vertical 9:16).
+              text: `Tu es un réalisateur et directeur artistique d'élite, spécialisé dans la production cinématographique (${activeProject?.contentType || 'court-métrage'}).
               
-Ta mission : Découper la narration suivante en un storyboard professionnel complet, captivant et rythmé d'environ 20 à 35 secondes.
+Ta mission : Découper la narration suivante en un storyboard professionnel complet, captivant et rythmé.
+Format visuel cible : ${activeProject?.format || '9:16'}.
+Langue principale : ${activeProject?.language || 'fr'}.
 Style visuel cible : ${selectedStyle.label}.
 Directives visuelles obligatoires pour les prompts : ${selectedStyle.promptModifier}
 
 Narration source : "${narration}"
 
 INSTRUCTIONS :
-1. Découpe l'histoire en scènes courtes de 3 à 5 secondes.
+1. Découpe l'histoire en scènes courtes de 3 à 5 secondes adaptées au format ${activeProject?.format || '9:16'}.
 2. Assure une forte tension émotionnelle et une cohérence visuelle parfaite entre chaque plan.
-3. Chaque 'imagePrompt' doit être en anglais, très précis et descriptif (composition 9:16 verticale, éclairage cinématique, lentille, ambiance, sujet en action).
-4. Fournis une recommandation musicale d'ambiance et un appel à l'action final (finalCTA).
+3. Chaque 'imagePrompt' doit être en anglais, très précis et descriptif (composition ${activeProject?.format || '9:16'}, éclairage cinématique, lentille, ambiance, sujet en action).
+4. La voix off ('voiceover') doit être rédigée dans la langue du projet : ${activeProject?.language || 'fr'}.
+5. Fournis une recommandation musicale d'ambiance et un appel à l'action final (finalCTA).
 
 Réponds STRICTEMENT au format JSON avec cette structure :
 {
@@ -162,6 +326,17 @@ Réponds STRICTEMENT au format JSON avec cette structure :
         }));
       }
       setStoryboard(result);
+      if (activeProject) {
+        projectsApi.update(activeProject.id, {
+          narration,
+          storyboard: result,
+          visualStyleId: selectedStyle.id,
+          status: 'completed'
+        }).then(updated => {
+          setActiveProject(updated);
+          setProjects(prev => prev.map(p => (p.id === updated.id ? updated : p)));
+        }).catch(e => console.warn('Background auto-save failed', e));
+      }
     } catch (err) {
       console.error(err);
       setError("Une erreur est survenue lors de la génération du storyboard. Veuillez réessayer.");
@@ -177,17 +352,18 @@ Réponds STRICTEMENT au format JSON avec cette structure :
     setRegeneratingImages(prev => new Set(prev).add(idx));
 
     try {
+      const projFormat = activeProject?.format === '16:9' ? '16:9' : activeProject?.format === '1:1' ? '1:1' : '9:16';
       const scene = storyboard.scenes[idx];
       const response = await ai.models.generateContent({
         model: IMAGE_MODEL,
         contents: [{ 
           parts: [{ 
-            text: `Cinematic vertical 9:16 still shot, professional high-end film production, master lighting, volumetric atmosphere. ${selectedStyle.promptModifier}. Scene details: ${scene.imagePrompt}` 
+            text: `Cinematic ${projFormat} still shot, professional high-end film production, master lighting, volumetric atmosphere. ${selectedStyle.promptModifier}. Scene details: ${scene.imagePrompt}` 
           }] 
         }],
         config: {
           imageConfig: {
-            aspectRatio: "9:16"
+            aspectRatio: projFormat
           }
         }
       });
@@ -552,10 +728,16 @@ Réponds STRICTEMENT au format JSON avec cette structure :
       {/* Top Studio Navbar */}
       <Navbar
         storyboard={storyboard}
+        activeProject={activeProject}
+        currentView={currentView}
+        onChangeView={setCurrentView}
+        onSaveProject={handleSaveActiveProjectStoryboard}
+        isSaving={isSavingProject}
+        onOpenNewProject={handleOpenCreateProject}
         isExporting={isExporting}
         onExportPDF={exportToPDF}
         onReset={() => {
-          if (window.confirm("Créer un nouveau projet ? Le storyboard actuel sera effacé.")) {
+          if (window.confirm("Créer un nouveau storyboard pour ce projet ? Le storyboard actuel sera réinitialisé.")) {
             setStoryboard(null);
             setNarration('');
             setStreamingText('');
@@ -564,7 +746,70 @@ Réponds STRICTEMENT au format JSON avec cette structure :
         }}
       />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-8 sm:py-12">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-10">
+        {currentView === 'projects' ? (
+          <ProjectsHub
+            projects={projects}
+            activeProjectId={activeProject?.id}
+            onSelectProject={handleSelectProject}
+            onCreateNew={handleOpenCreateProject}
+            onEditProject={handleOpenEditProject}
+            onDuplicateProject={handleDuplicateProject}
+            onDeleteProject={handleOpenDeleteModal}
+          />
+        ) : (
+          <>
+            {/* Active Project Breadcrumb / Command Bar */}
+            <div className="mb-8 flex flex-wrap items-center justify-between gap-3 p-3.5 sm:p-4 bg-white/[0.02] hover:bg-white/[0.03] border border-white/[0.08] rounded-2xl transition-all">
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setCurrentView('projects')}
+                  className="px-3 py-1.5 bg-white/[0.05] hover:bg-white/[0.1] text-white/80 hover:text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Tous les Projets</span>
+                </button>
+                <div className="h-4 w-px bg-white/10 hidden sm:block" />
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold text-white max-w-[180px] sm:max-w-xs md:max-w-md truncate font-display">
+                    {activeProject ? activeProject.title : 'Projet sans titre'}
+                  </span>
+                  {activeProject && (
+                    <>
+                      <span className="px-2 py-0.5 rounded-md bg-orange-500/15 text-orange-400 border border-orange-500/25 text-[11px] font-mono font-bold">
+                        {activeProject.format}
+                      </span>
+                      <span className="hidden md:inline-block px-2 py-0.5 rounded-md bg-white/[0.04] text-white/60 border border-white/[0.06] text-[11px]">
+                        {activeProject.contentType}
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {activeProject && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEditProject(activeProject)}
+                    className="px-3 py-1.5 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-white/80 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Edit3 className="w-3.5 h-3.5 text-white/60" />
+                    <span>Modifier le projet</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleSaveActiveProjectStoryboard}
+                  disabled={isSavingProject}
+                  className="px-3.5 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-sm"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>{isSavingProject ? 'Sauvegarde...' : 'Sauvegarder'}</span>
+                </button>
+              </div>
+            </div>
         
         {/* Hero Section & Studio Command Deck */}
         <section className="mb-12 sm:mb-16">
@@ -975,10 +1220,12 @@ Réponds STRICTEMENT au format JSON avec cette structure :
             </p>
           </div>
         )}
+          </>
+        )}
 
       </main>
 
-      {/* Fullscreen 9:16 Image Lightbox Modal */}
+      {/* Fullscreen Image Lightbox Modal */}
       {selectedModalScene && (
         <ImageModal
           scene={selectedModalScene}
@@ -997,6 +1244,52 @@ Réponds STRICTEMENT au format JSON avec cette structure :
           onDownload={downloadFile}
         />
       )}
+
+      {/* Project Create / Edit Modal */}
+      <ProjectModal
+        isOpen={isProjectModalOpen}
+        mode={projectModalMode}
+        initialData={projectToEdit || undefined}
+        onClose={() => setIsProjectModalOpen(false)}
+        onSave={handleSaveProjectForm}
+      />
+
+      {/* Delete Project Confirmation Modal */}
+      <DeleteConfirmModal
+        isOpen={isDeleteModalOpen}
+        projectTitle={projectToDelete?.title || ''}
+        isDeleting={isDeleting}
+        onClose={() => {
+          setIsDeleteModalOpen(false);
+          setProjectToDelete(null);
+        }}
+        onConfirm={handleConfirmDelete}
+      />
+
+      {/* Floating Toast Notification */}
+      <AnimatePresence>
+        {toastMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+            className={`fixed bottom-6 right-6 z-50 flex items-center gap-2.5 px-4 py-3 rounded-2xl text-xs font-semibold shadow-2xl backdrop-blur-md border ${
+              toastMessage.type === 'error'
+                ? 'bg-rose-950/90 border-rose-500/30 text-rose-200 shadow-rose-950/40'
+                : toastMessage.type === 'info'
+                ? 'bg-slate-900/90 border-cyan-500/30 text-cyan-200 shadow-cyan-950/40'
+                : 'bg-emerald-950/90 border-emerald-500/30 text-emerald-200 shadow-emerald-950/40'
+            }`}
+          >
+            {toastMessage.type === 'error' ? (
+              <AlertCircle className="w-4 h-4 text-rose-400" />
+            ) : (
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            )}
+            <span>{toastMessage.text}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Modern Studio Footer */}
       <footer className="py-8 border-t border-white/[0.06] bg-[#05060a] mt-auto">
