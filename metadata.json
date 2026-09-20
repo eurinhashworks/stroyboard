@@ -1,0 +1,6 @@
+{
+  "name": "AI Director - Storyboard Creator",
+  "description": "Transform your narration into a cinematic storyboard for vertical videos (TikTok/Reels style).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
